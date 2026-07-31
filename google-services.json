@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "598062981607",
+    "project_id": "rotomonster-alerts",
+    "storage_bucket": "rotomonster-alerts.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:598062981607:android:f923caff4b950eabf8dd42",
+        "android_client_info": {
+          "package_name": "com.rotomonster.alerts"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB7r05YoYu46nWGTF-GKILpki8IwVA1dV8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
