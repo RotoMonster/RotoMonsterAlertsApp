@@ -6,6 +6,7 @@ import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   ActivityIndicator,
   Alert as RNAlert,
@@ -31,11 +32,25 @@ export const STORAGE_KEYS = {
   HOURS: '@rm_alerts:hours',
 };
 
-const SPORTS: { key: string; label: string; sportId: number | null }[] = [
-  { key: 'all', label: 'All', sportId: null },
-  { key: 'nba', label: 'NBA', sportId: 1 },
-  { key: 'mlb', label: 'MLB', sportId: 2 },
+const DEFAULT_COLOR = '#475569';
+
+const SPORTS: { key: string; label: string; sportId: number | null; color: string; tab: boolean }[] = [
+  { key: 'all', label: 'All', sportId: null, color: DEFAULT_COLOR, tab: true },
+  { key: 'nba', label: 'NBA', sportId: 1, color: '#ff8833', tab: true },
+  { key: 'mlb', label: 'MLB', sportId: 2, color: '#2d7a3e', tab: false },
+  { key: 'nfl', label: 'NFL', sportId: 3, color: '#8b5a2b', tab: false },
+  { key: 'nhl', label: 'NHL', sportId: 4, color: '#2563eb', tab: false },
 ];
+
+const LEVELS: Record<string, { label: string; color: string }> = {
+  low: { label: 'LOW', color: '#64748b' },
+  medium: { label: 'MEDIUM', color: '#d97706' },
+  high: { label: 'HIGH', color: '#dc2626' },
+  monster: { label: 'MONSTER', color: '#7c3aed' },
+};
+
+const sportFor = (sportId: number | null) =>
+  sportId == null ? null : SPORTS.find((s) => s.sportId === sportId) ?? null;
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -52,12 +67,14 @@ interface MonitorMessage {
   title: string;
   body: string | null;
   url: string | null;
+  level?: string | null;
   created_at: string;
 }
 
 const URL_PATTERN = /(https?:\/\/[^\s]+)/g;
 
 export default function HomeScreen() {
+  const insets = useSafeAreaInsets();
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
@@ -85,7 +102,6 @@ export default function HomeScreen() {
     };
   }, []);
 
-  // Settings live on the other tab, so re-read them whenever this one is shown.
   useFocusEffect(
     React.useCallback(() => {
       restoreState();
@@ -132,7 +148,6 @@ export default function HomeScreen() {
     });
 
     responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-      // Tapping a notification that carries a url opens it directly.
       const url = response.notification.request.content.data?.url as string | undefined;
       if (url) openUrl(url);
       loadMessagesUsingStoredHours();
@@ -226,8 +241,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Everything is fetched once and filtered on the device, so switching tabs
-  // is instant and works offline against the cache.
   const loadMessages = async (forHours: number, showRefreshing = false) => {
     if (showRefreshing) setRefreshing(true);
 
@@ -258,8 +271,6 @@ export default function HomeScreen() {
     refreshIntervalRef.current = setInterval(() => loadMessages(forHours), REFRESH_INTERVAL);
   };
 
-  // Clear hides everything currently visible by remembering the moment it was
-  // pressed. Nothing is deleted, so View All brings it all back.
   const handleClear = async () => {
     const now = new Date().toISOString();
     await AsyncStorage.setItem(STORAGE_KEYS.CLEARED_AT, now);
@@ -298,13 +309,6 @@ export default function HomeScreen() {
     return date.toLocaleString();
   };
 
-  const sportLabel = (sportId: number | null) => {
-    if (sportId === 1) return 'NBA';
-    if (sportId === 2) return 'MLB';
-    return null;
-  };
-
-  // Turns bare urls in the message body into tappable text.
   const renderBody = (body: string) => {
     const parts = body.split(URL_PATTERN);
     return (
@@ -323,14 +327,21 @@ export default function HomeScreen() {
   };
 
   const renderMessage = ({ item }: { item: MonitorMessage }) => {
-    const label = sportLabel(item.sport_id);
+    const sport = sportFor(item.sport_id);
+    const color = sport?.color ?? DEFAULT_COLOR;
+    const level = item.level ? LEVELS[item.level] : undefined;
 
     return (
-      <View style={styles.messageCard}>
+      <View style={[styles.messageCard, { borderColor: color }]}>
         <View style={styles.messageHeader}>
-          {label && (
-            <View style={styles.sportPill}>
-              <Text style={styles.sportPillText}>{label}</Text>
+          {sport && (
+            <View style={[styles.sportPill, { backgroundColor: `${color}1F` }]}>
+              <Text style={[styles.sportPillText, { color }]}>{sport.label}</Text>
+            </View>
+          )}
+          {level && (
+            <View style={[styles.sportPill, { backgroundColor: level.color }]}>
+              <Text style={[styles.sportPillText, { color: '#fff' }]}>{level.label}</Text>
             </View>
           )}
           <Text style={styles.timestamp}>{formatTimestamp(item.created_at)}</Text>
@@ -352,7 +363,7 @@ export default function HomeScreen() {
   if (!isRegistered) {
     return (
       <KeyboardAvoidingView
-        style={styles.registerContainer}
+        style={[styles.registerContainer, { paddingTop: insets.top }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <Text style={styles.registerTitle}>RotoMonster Alerts</Text>
@@ -384,19 +395,22 @@ export default function HomeScreen() {
   }
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.tabs}>
-        {SPORTS.map((sport) => (
-          <TouchableOpacity
-            key={sport.key}
-            style={[styles.tab, activeSport === sport.key && styles.tabActive]}
-            onPress={() => setActiveSport(sport.key)}
-          >
-            <Text style={[styles.tabText, activeSport === sport.key && styles.tabTextActive]}>
-              {sport.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        {SPORTS.filter((s) => s.tab).map((sport) => {
+          const active = activeSport === sport.key;
+          return (
+            <TouchableOpacity
+              key={sport.key}
+              style={[styles.tab, active && { borderBottomColor: sport.color }]}
+              onPress={() => setActiveSport(sport.key)}
+            >
+              <Text style={[styles.tabText, active && { color: sport.color }]}>
+                {sport.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       <View style={styles.toolbar}>
@@ -472,9 +486,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e2e8f0',
   },
   tab: { flex: 1, paddingVertical: 14, alignItems: 'center', borderBottomWidth: 3, borderBottomColor: 'transparent' },
-  tabActive: { borderBottomColor: '#E66000' },
   tabText: { fontSize: 15, fontWeight: '600', color: '#64748b' },
-  tabTextActive: { color: '#E66000' },
 
   toolbar: {
     flexDirection: 'row',
@@ -501,18 +513,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     padding: 14,
     borderRadius: 10,
-    borderLeftWidth: 3,
-    borderLeftColor: '#E66000',
+    borderWidth: 1.5,
   },
   messageHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   sportPill: {
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 4,
-    backgroundColor: 'rgba(230, 96, 0, 0.12)',
     marginRight: 8,
   },
-  sportPillText: { fontSize: 11, fontWeight: '700', color: '#E66000' },
+  sportPillText: { fontSize: 11, fontWeight: '700' },
   timestamp: { fontSize: 12, color: '#94a3b8', marginLeft: 'auto' },
   messageTitle: { fontSize: 16, fontWeight: '600', color: '#1e293b', marginBottom: 4 },
   messageBody: { fontSize: 14, color: '#475569', lineHeight: 20 },

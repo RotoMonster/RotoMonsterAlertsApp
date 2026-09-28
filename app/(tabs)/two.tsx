@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import React from 'react';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Alert as RNAlert,
@@ -23,6 +24,7 @@ const STORAGE_KEYS = {
 };
 
 export default function SettingsScreen() {
+  const insets = useSafeAreaInsets();
   const [registeredCode, setRegisteredCode] = useState<string | null>(null);
   const [hours, setHours] = useState(DEFAULT_HOURS);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -111,7 +113,7 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top + 16 }]}>
       <Text style={styles.sectionLabel}>SHOW MESSAGES FROM THE PAST</Text>
       <View style={styles.hoursRow}>
         {HOUR_OPTIONS.map((option) => (
