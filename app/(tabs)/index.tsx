@@ -43,10 +43,10 @@ const SPORTS: { key: string; label: string; sportId: number | null; color: strin
 ];
 
 const LEVELS: Record<string, { label: string; color: string }> = {
-  low: { label: 'LOW', color: '#64748b' },
-  medium: { label: 'MEDIUM', color: '#d97706' },
-  high: { label: 'HIGH', color: '#dc2626' },
-  monster: { label: 'MONSTER', color: '#7c3aed' },
+  low: { label: 'LOW', color: '#8c8c8c' },
+  medium: { label: 'MEDIUM', color: '#6699ff' },
+  high: { label: 'HIGH', color: '#e68a00' },
+  monster: { label: 'MONSTER', color: '#cc3300' },
 };
 
 const sportFor = (sportId: number | null) =>
@@ -339,12 +339,13 @@ export default function HomeScreen() {
               <Text style={[styles.sportPillText, { color }]}>{sport.label}</Text>
             </View>
           )}
+          <Text style={styles.timestamp}>{formatTimestamp(item.created_at)}</Text>
+          <View style={styles.headerSpacer} />
           {level && (
-            <View style={[styles.sportPill, { backgroundColor: level.color }]}>
-              <Text style={[styles.sportPillText, { color: '#fff' }]}>{level.label}</Text>
+            <View style={[styles.levelBadge, { backgroundColor: level.color }]}>
+              <Text style={styles.levelBadgeText}>{level.label}</Text>
             </View>
           )}
-          <Text style={styles.timestamp}>{formatTimestamp(item.created_at)}</Text>
         </View>
 
         <Text style={styles.messageTitle}>{item.title}</Text>
@@ -517,13 +518,20 @@ const styles = StyleSheet.create({
   },
   messageHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   sportPill: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 999,
     marginRight: 8,
   },
   sportPillText: { fontSize: 11, fontWeight: '700' },
-  timestamp: { fontSize: 12, color: '#94a3b8', marginLeft: 'auto' },
+  timestamp: { fontSize: 12, color: '#94a3b8' },
+  headerSpacer: { flex: 1 },
+  levelBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  levelBadgeText: { fontSize: 11, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
   messageTitle: { fontSize: 16, fontWeight: '600', color: '#1e293b', marginBottom: 4 },
   messageBody: { fontSize: 14, color: '#475569', lineHeight: 20 },
   inlineLink: { color: '#2563eb', textDecorationLine: 'underline' },
