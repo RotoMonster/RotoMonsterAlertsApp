@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import React from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Palette, ThemePreference, useAppTheme } from '@/components/AppTheme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Alert as RNAlert,
@@ -15,20 +16,31 @@ import {
 const SERVER_URL = 'https://alerts.rotomonster.com';
 const DEFAULT_HOURS = 12;
 const HOUR_OPTIONS = [6, 12, 24, 48, 72];
+const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
 
 const STORAGE_KEYS = {
   USER_CODE: '@rm_alerts:user_code',
   MESSAGES: '@rm_alerts:messages',
   CLEARED_AT: '@rm_alerts:cleared_at',
   HOURS: '@rm_alerts:hours',
+  DISMISSED: '@rm_alerts:dismissed',
+  MY_PLAYERS: '@rm_alerts:my_players',
 };
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const { colors: c, preference, setPreference } = useAppTheme();
+  const styles = useMemo(() => makeStyles(c), [c]);
   const [registeredCode, setRegisteredCode] = useState<string | null>(null);
   const [hours, setHours] = useState(DEFAULT_HOURS);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [myPlayersOnly, setMyPlayersOnly] = useState(false);
+  const [linked, setLinked] = useState(true);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -38,10 +50,13 @@ export default function SettingsScreen() {
 
   const loadSettings = async () => {
     try {
-      const [storedCode, storedHours] = await Promise.all([
+      const [storedCode, storedHours, storedMyPlayers] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.USER_CODE),
         AsyncStorage.getItem(STORAGE_KEYS.HOURS),
+        AsyncStorage.getItem(STORAGE_KEYS.MY_PLAYERS),
       ]);
+
+      setMyPlayersOnly(storedMyPlayers === 'true');
 
       setRegisteredCode(storedCode);
 
@@ -52,9 +67,15 @@ export default function SettingsScreen() {
         try {
           const response = await fetch(`${SERVER_URL}/api/device/${storedCode}/notifications-status`);
           const data = await response.json();
-          if (data.success) setNotificationsEnabled(data.enabled);
+          if (data.success) {
+            setNotificationsEnabled(data.enabled);
+            if (typeof data.myPlayersOnly === 'boolean') {
+              setMyPlayersOnly(data.myPlayersOnly);
+              await AsyncStorage.setItem(STORAGE_KEYS.MY_PLAYERS, String(data.myPlayersOnly));
+            }
+            if (typeof data.linked === 'boolean') setLinked(data.linked);
+          }
         } catch (error) {
-          // Offline - leave the switch showing whatever it last showed.
         }
       }
     } catch (error) {
@@ -90,6 +111,28 @@ export default function SettingsScreen() {
     }
   };
 
+  const changeMyPlayers = async (value: boolean) => {
+    const previous = myPlayersOnly;
+    setMyPlayersOnly(value);
+    await AsyncStorage.setItem(STORAGE_KEYS.MY_PLAYERS, String(value));
+
+    if (!registeredCode) return;
+
+    try {
+      const response = await fetch(`${SERVER_URL}/api/device/${registeredCode}/filter`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ myPlayersOnly: value }),
+      });
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error);
+    } catch (error) {
+      setMyPlayersOnly(previous);
+      await AsyncStorage.setItem(STORAGE_KEYS.MY_PLAYERS, String(previous));
+      RNAlert.alert('Error', 'Could not update the player alerts setting.');
+    }
+  };
+
   const unregister = () => {
     RNAlert.alert(
       'Unregister',
@@ -104,6 +147,8 @@ export default function SettingsScreen() {
               STORAGE_KEYS.USER_CODE,
               STORAGE_KEYS.MESSAGES,
               STORAGE_KEYS.CLEARED_AT,
+              STORAGE_KEYS.DISMISSED,
+              STORAGE_KEYS.MY_PLAYERS,
             ]);
             setRegisteredCode(null);
           },
@@ -129,6 +174,44 @@ export default function SettingsScreen() {
         ))}
       </View>
 
+      <Text style={styles.sectionLabel}>PLAYER ALERTS</Text>
+      <View style={styles.hoursRow}>
+        {[
+          { value: false, label: 'All players' },
+          { value: true, label: 'My players' },
+        ].map((option) => (
+          <TouchableOpacity
+            key={option.label}
+            style={[styles.hourPill, myPlayersOnly === option.value && styles.hourPillActive]}
+            onPress={() => changeMyPlayers(option.value)}
+          >
+            <Text style={[styles.hourPillText, myPlayersOnly === option.value && styles.hourPillTextActive]}>
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      {myPlayersOnly && !linked && (
+        <Text style={styles.helperText}>
+          Your code isn't linked to a Basketball Monster account yet, so player alerts won't show until it is.
+        </Text>
+      )}
+
+      <Text style={styles.sectionLabel}>APPEARANCE</Text>
+      <View style={styles.hoursRow}>
+        {THEME_OPTIONS.map((option) => (
+          <TouchableOpacity
+            key={option.value}
+            style={[styles.hourPill, preference === option.value && styles.hourPillActive]}
+            onPress={() => setPreference(option.value)}
+          >
+            <Text style={[styles.hourPillText, preference === option.value && styles.hourPillTextActive]}>
+              {option.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
       <Text style={styles.sectionLabel}>NOTIFICATIONS</Text>
       <View style={styles.row}>
         <View style={styles.rowText}>
@@ -141,7 +224,7 @@ export default function SettingsScreen() {
           value={notificationsEnabled}
           onValueChange={toggleNotifications}
           disabled={busy || !registeredCode}
-          trackColor={{ true: '#E66000', false: '#cbd5e1' }}
+          trackColor={{ true: '#E66000', false: c.control }}
         />
       </View>
 
@@ -162,14 +245,15 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc', padding: 16 },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg, padding: 16 },
 
   sectionLabel: {
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.6,
-    color: '#94a3b8',
+    color: c.muted,
     marginTop: 20,
     marginBottom: 8,
   },
@@ -180,32 +264,33 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 2,
-    borderColor: '#cbd5e1',
-    backgroundColor: '#fff',
+    borderColor: c.control,
+    backgroundColor: c.card,
   },
   hourPillActive: { backgroundColor: '#E66000', borderColor: '#E66000' },
   hourPillText: { fontSize: 14, fontWeight: '700', color: '#E66000' },
   hourPillTextActive: { color: '#fff' },
+  helperText: { fontSize: 13, color: c.sub, marginTop: 8, lineHeight: 18 },
 
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: c.card,
     borderRadius: 10,
     padding: 14,
   },
   rowText: { flex: 1, paddingRight: 12 },
-  rowTitle: { fontSize: 15, fontWeight: '600', color: '#1e293b' },
-  rowSubtitle: { fontSize: 13, color: '#64748b', marginTop: 2 },
+  rowTitle: { fontSize: 15, fontWeight: '600', color: c.text },
+  rowSubtitle: { fontSize: 13, color: c.sub, marginTop: 2 },
 
   dangerButton: {
     marginTop: 28,
     paddingVertical: 13,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#fecaca',
-    backgroundColor: '#fef2f2',
+    borderColor: c.dangerBorder,
+    backgroundColor: c.dangerBg,
     alignItems: 'center',
   },
-  dangerButtonText: { fontSize: 15, fontWeight: '600', color: '#dc2626' },
+  dangerButtonText: { fontSize: 15, fontWeight: '600', color: c.danger },
 });

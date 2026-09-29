@@ -4,9 +4,11 @@ import * as Notifications from 'expo-notifications';
 import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import { Palette, useAppTheme } from '@/components/AppTheme';
 import {
   ActivityIndicator,
   Alert as RNAlert,
@@ -19,6 +21,7 @@ import {
   Text,
   RefreshControl,
   FlatList,
+  LayoutAnimation,
 } from 'react-native';
 
 const SERVER_URL = 'https://alerts.rotomonster.com';
@@ -30,7 +33,11 @@ export const STORAGE_KEYS = {
   MESSAGES: '@rm_alerts:messages',
   CLEARED_AT: '@rm_alerts:cleared_at',
   HOURS: '@rm_alerts:hours',
+  DISMISSED: '@rm_alerts:dismissed',
+  MY_PLAYERS: '@rm_alerts:my_players',
 };
+
+const MAX_DISMISSED = 500;
 
 const DEFAULT_COLOR = '#475569';
 
@@ -47,6 +54,14 @@ const LEVELS: Record<string, { label: string; color: string }> = {
   medium: { label: 'MEDIUM', color: '#6699ff' },
   high: { label: 'HIGH', color: '#e68a00' },
   monster: { label: 'MONSTER', color: '#cc3300' },
+};
+
+const STATUSES: Record<string, { label: string; color: string; shade: boolean }> = {
+  probable: { label: 'PROBABLE', color: '#00cc44', shade: true },
+  questionable: { label: 'QUESTIONABLE', color: '#01A9DB', shade: true },
+  injured: { label: 'INJURED', color: '#cc3300', shade: true },
+  traded: { label: 'TRADED', color: '#e68a00', shade: true },
+  note: { label: 'NOTE', color: '#a6a6a6', shade: true },
 };
 
 const sportFor = (sportId: number | null) =>
@@ -68,6 +83,9 @@ interface MonitorMessage {
   body: string | null;
   url: string | null;
   level?: string | null;
+  status?: string | null;
+  is_player?: boolean;
+  mine?: boolean;
   created_at: string;
 }
 
@@ -75,6 +93,8 @@ const URL_PATTERN = /(https?:\/\/[^\s]+)/g;
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
+  const { colors: c, scheme } = useAppTheme();
+  const styles = useMemo(() => makeStyles(c), [c]);
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
@@ -86,6 +106,9 @@ export default function HomeScreen() {
   const [activeSport, setActiveSport] = useState('all');
   const [clearedAt, setClearedAt] = useState<string | null>(null);
   const [hours, setHours] = useState(DEFAULT_HOURS);
+  const [booting, setBooting] = useState(true);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [myPlayersOnly, setMyPlayersOnly] = useState(false);
 
   const notificationListener = useRef<Notifications.Subscription | null>(null);
   const responseListener = useRef<Notifications.Subscription | null>(null);
@@ -115,13 +138,23 @@ export default function HomeScreen() {
 
   const restoreState = async () => {
     try {
-      const [storedCode, storedCleared, storedHours] = await Promise.all([
+      const [storedCode, storedCleared, storedHours, storedDismissed, storedMyPlayers] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.USER_CODE),
         AsyncStorage.getItem(STORAGE_KEYS.CLEARED_AT),
         AsyncStorage.getItem(STORAGE_KEYS.HOURS),
+        AsyncStorage.getItem(STORAGE_KEYS.DISMISSED),
+        AsyncStorage.getItem(STORAGE_KEYS.MY_PLAYERS),
       ]);
 
+      setMyPlayersOnly(storedMyPlayers === 'true');
+
       setClearedAt(storedCleared);
+      try {
+        const parsed = storedDismissed ? JSON.parse(storedDismissed) : [];
+        setDismissed(Array.isArray(parsed) ? parsed : []);
+      } catch {
+        setDismissed([]);
+      }
       const parsedHours = storedHours ? parseInt(storedHours, 10) : DEFAULT_HOURS;
       const effectiveHours = Number.isFinite(parsedHours) ? parsedHours : DEFAULT_HOURS;
       setHours(effectiveHours);
@@ -139,6 +172,8 @@ export default function HomeScreen() {
       }
     } catch (error) {
       console.error('Error restoring state:', error);
+    } finally {
+      setBooting(false);
     }
   };
 
@@ -245,7 +280,9 @@ export default function HomeScreen() {
     if (showRefreshing) setRefreshing(true);
 
     try {
-      const response = await fetch(`${SERVER_URL}/api/messages?hours=${forHours}`);
+      const storedCode = await AsyncStorage.getItem(STORAGE_KEYS.USER_CODE);
+      const codeParam = storedCode ? `&code=${encodeURIComponent(storedCode)}` : '';
+      const response = await fetch(`${SERVER_URL}/api/messages?hours=${forHours}${codeParam}`);
       const data = await response.json();
 
       if (data.success) {
@@ -278,8 +315,18 @@ export default function HomeScreen() {
   };
 
   const handleViewAll = async () => {
-    await AsyncStorage.removeItem(STORAGE_KEYS.CLEARED_AT);
+    await AsyncStorage.multiRemove([STORAGE_KEYS.CLEARED_AT, STORAGE_KEYS.DISMISSED]);
     setClearedAt(null);
+    setDismissed([]);
+  };
+
+  const dismissMessage = (messageId: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setDismissed((prev) => {
+      const next = [...prev.filter((id) => id !== messageId), messageId].slice(-MAX_DISMISSED);
+      AsyncStorage.setItem(STORAGE_KEYS.DISMISSED, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
   };
 
   const openUrl = async (url: string) => {
@@ -294,6 +341,8 @@ export default function HomeScreen() {
     const sport = SPORTS.find((s) => s.key === activeSport);
     if (sport?.sportId != null && m.sport_id !== sport.sportId) return false;
     if (clearedAt && new Date(m.created_at) <= new Date(clearedAt)) return false;
+    if (dismissed.includes(m.message_id)) return false;
+    if (myPlayersOnly && m.is_player && !m.mine) return false;
     return true;
   });
 
@@ -330,14 +379,38 @@ export default function HomeScreen() {
     const sport = sportFor(item.sport_id);
     const color = sport?.color ?? DEFAULT_COLOR;
     const level = item.level ? LEVELS[item.level] : undefined;
+    const status = item.status ? STATUSES[item.status] : undefined;
+    const shade = status?.shade ? `${status.color}${scheme === 'dark' ? '29' : '1A'}` : null;
 
     return (
-      <View style={[styles.messageCard, { borderColor: color }]}>
+      <ReanimatedSwipeable
+        containerStyle={styles.swipeContainer}
+        friction={1.5}
+        rightThreshold={80}
+        overshootRight={false}
+        renderRightActions={() => (
+          <View style={styles.dismissAction}>
+            <Text style={styles.dismissActionText}>Dismiss</Text>
+          </View>
+        )}
+        onSwipeableWillOpen={() => dismissMessage(item.message_id)}
+      >
+      <View
+        style={[
+          styles.messageCard,
+          { borderColor: color },
+        ]}
+      >
+      <View style={[styles.cardInner, shade ? { backgroundColor: shade } : null]}
+      >
         <View style={styles.messageHeader}>
           {sport && (
-            <View style={[styles.sportPill, { backgroundColor: `${color}1F` }]}>
-              <Text style={[styles.sportPillText, { color }]}>{sport.label}</Text>
+            <View style={[styles.sportPill, { backgroundColor: color }]}>
+              <Text style={[styles.sportPillText, { color: '#fff' }]}>{sport.label}</Text>
             </View>
+          )}
+          {status && (
+            <Text style={[styles.statusText, { color: status.color }]}>{status.label}</Text>
           )}
           <Text style={styles.timestamp}>{formatTimestamp(item.created_at)}</Text>
           <View style={styles.headerSpacer} />
@@ -358,8 +431,19 @@ export default function HomeScreen() {
           </TouchableOpacity>
         )}
       </View>
+      </View>
+      </ReanimatedSwipeable>
     );
   };
+
+  if (booting) {
+    return (
+      <View style={[styles.container, styles.bootWrap, { paddingTop: insets.top }]}>
+        <ActivityIndicator size="large" color={c.sub} />
+        <Text style={styles.bootText}>Loading alerts</Text>
+      </View>
+    );
+  }
 
   if (!isRegistered) {
     return (
@@ -373,7 +457,7 @@ export default function HomeScreen() {
         <TextInput
           style={styles.codeInput}
           placeholder="Code"
-          placeholderTextColor="#94a3b8"
+          placeholderTextColor={c.muted}
           value={code}
           onChangeText={setCode}
           autoCapitalize="characters"
@@ -403,10 +487,10 @@ export default function HomeScreen() {
           return (
             <TouchableOpacity
               key={sport.key}
-              style={[styles.tab, active && { borderBottomColor: sport.color }]}
+              style={[styles.tab, active && { borderBottomColor: sport.key === 'all' ? c.allTab : sport.color }]}
               onPress={() => setActiveSport(sport.key)}
             >
-              <Text style={[styles.tabText, active && { color: sport.color }]}>
+              <Text style={[styles.tabText, active && { color: sport.key === 'all' ? c.allTab : sport.color }]}>
                 {sport.label}
               </Text>
             </TouchableOpacity>
@@ -416,10 +500,12 @@ export default function HomeScreen() {
 
       <View style={styles.toolbar}>
         <Text style={styles.toolbarInfo}>
-          Past {hours}h{!isOnline ? ' · offline' : ''}
+          {myPlayersOnly && <Text style={styles.filterLabel}>My players</Text>}
+          {myPlayersOnly ? ' · ' : ''}Past {hours}h{!isOnline ? ' · offline' : ''}
         </Text>
+        <View style={styles.headerSpacer} />
         <View style={styles.toolbarActions}>
-          {clearedAt ? (
+          {clearedAt || dismissed.length > 0 ? (
             <TouchableOpacity style={styles.toolbarButton} onPress={handleViewAll}>
               <Text style={styles.toolbarButtonText}>View All</Text>
             </TouchableOpacity>
@@ -437,11 +523,15 @@ export default function HomeScreen() {
         renderItem={renderMessage}
         contentContainerStyle={visibleMessages.length === 0 && styles.emptyWrap}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => loadMessages(hours, true)} />
+          <RefreshControl tintColor={c.sub} refreshing={refreshing} onRefresh={() => loadMessages(hours, true)} />
         }
         ListEmptyComponent={
           <Text style={styles.emptyText}>
-            {clearedAt ? 'Messages cleared. Press View All to show them again.' : 'No messages.'}
+            {clearedAt || dismissed.length > 0
+              ? 'Nothing to show. Press View All to bring back cleared alerts.'
+              : myPlayersOnly
+                ? 'No alerts for your players. Change this in Settings.'
+                : 'No messages.'}
           </Text>
         }
       />
@@ -449,27 +539,28 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8fafc' },
+const makeStyles = (c: Palette) =>
+  StyleSheet.create({
+  container: { flex: 1, backgroundColor: c.bg },
 
   registerContainer: {
     flex: 1,
     justifyContent: 'center',
     padding: 28,
-    backgroundColor: '#f8fafc',
+    backgroundColor: c.bg,
   },
-  registerTitle: { fontSize: 26, fontWeight: '700', color: '#1e293b', marginBottom: 8 },
-  registerSubtitle: { fontSize: 15, color: '#64748b', marginBottom: 24, lineHeight: 21 },
+  registerTitle: { fontSize: 26, fontWeight: '700', color: c.text, marginBottom: 8 },
+  registerSubtitle: { fontSize: 15, color: c.sub, marginBottom: 24, lineHeight: 21 },
   codeInput: {
     borderWidth: 1,
-    borderColor: '#cbd5e1',
+    borderColor: c.control,
     borderRadius: 10,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 17,
-    backgroundColor: '#fff',
+    backgroundColor: c.card,
     marginBottom: 16,
-    color: '#1e293b',
+    color: c.text,
   },
   primaryButton: {
     backgroundColor: '#E66000',
@@ -482,12 +573,12 @@ const styles = StyleSheet.create({
 
   tabs: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: c.card,
     borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    borderBottomColor: c.border,
   },
   tab: { flex: 1, paddingVertical: 14, alignItems: 'center', borderBottomWidth: 3, borderBottomColor: 'transparent' },
-  tabText: { fontSize: 15, fontWeight: '600', color: '#64748b' },
+  tabText: { fontSize: 15, fontWeight: '600', color: c.sub },
 
   toolbar: {
     flexDirection: 'row',
@@ -496,26 +587,40 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  toolbarInfo: { fontSize: 13, color: '#64748b' },
+  filterLabel: { fontWeight: '700', color: '#E66000' },
+  toolbarInfo: { fontSize: 13, color: c.sub },
   toolbarActions: { flexDirection: 'row' },
   toolbarButton: {
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#cbd5e1',
-    backgroundColor: '#fff',
+    borderColor: c.control,
+    backgroundColor: c.card,
   },
-  toolbarButtonText: { fontSize: 13, fontWeight: '600', color: '#475569' },
+  toolbarButtonText: { fontSize: 13, fontWeight: '600', color: c.body },
 
-  messageCard: {
-    backgroundColor: '#fff',
-    marginHorizontal: 12,
-    marginBottom: 10,
-    padding: 14,
-    borderRadius: 10,
-    borderWidth: 1.5,
+  swipeContainer: { marginHorizontal: 12, marginBottom: 10 },
+  dismissAction: {
+    flex: 1,
+    backgroundColor: '#dc2626',
+    borderRadius: 12,
+    marginLeft: 8,
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    paddingHorizontal: 20,
   },
+  dismissActionText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  bootWrap: { justifyContent: 'center', alignItems: 'center' },
+  bootText: { marginTop: 12, fontSize: 14, color: c.sub },
+  messageCard: {
+    backgroundColor: c.card,
+    borderRadius: 12,
+    borderWidth: 2.5,
+    overflow: 'hidden',
+  },
+  cardInner: { padding: 14 },
+  statusText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.5, marginRight: 8 },
   messageHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 6 },
   sportPill: {
     paddingHorizontal: 8,
@@ -524,7 +629,7 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   sportPillText: { fontSize: 11, fontWeight: '700' },
-  timestamp: { fontSize: 12, color: '#94a3b8' },
+  timestamp: { fontSize: 12, color: c.sub },
   headerSpacer: { flex: 1 },
   levelBadge: {
     paddingHorizontal: 8,
@@ -532,19 +637,19 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   levelBadgeText: { fontSize: 11, fontWeight: '800', color: '#fff', letterSpacing: 0.5 },
-  messageTitle: { fontSize: 16, fontWeight: '600', color: '#1e293b', marginBottom: 4 },
-  messageBody: { fontSize: 14, color: '#475569', lineHeight: 20 },
-  inlineLink: { color: '#2563eb', textDecorationLine: 'underline' },
+  messageTitle: { fontSize: 16, fontWeight: '400', color: c.text, marginBottom: 4 },
+  messageBody: { fontSize: 14, color: c.body, lineHeight: 20 },
+  inlineLink: { color: c.link, textDecorationLine: 'underline' },
   linkButton: {
     marginTop: 10,
     alignSelf: 'flex-start',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 6,
-    backgroundColor: '#eff6ff',
+    backgroundColor: c.linkBg,
   },
-  linkButtonText: { fontSize: 13, fontWeight: '600', color: '#2563eb' },
+  linkButtonText: { fontSize: 13, fontWeight: '600', color: c.link },
 
   emptyWrap: { flexGrow: 1, justifyContent: 'center', alignItems: 'center' },
-  emptyText: { fontSize: 15, color: '#94a3b8', textAlign: 'center', paddingHorizontal: 32 },
+  emptyText: { fontSize: 15, color: c.muted, textAlign: 'center', paddingHorizontal: 32 },
 });

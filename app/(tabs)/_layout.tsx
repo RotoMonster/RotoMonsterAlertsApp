@@ -3,10 +3,7 @@ import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { Tabs } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import Colors from '@/constants/Colors';
-import { useColorScheme } from '@/components/useColorScheme';
-import { useClientOnlyValue } from '@/components/useClientOnlyValue';
-
+import { useAppTheme } from '@/components/AppTheme';
 
 function TabBarIcon(props: {
   name: React.ComponentProps<typeof FontAwesome>['name'];
@@ -16,29 +13,26 @@ function TabBarIcon(props: {
 }
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
   const insets = useSafeAreaInsets();
+  const { colors, scheme } = useAppTheme();
 
   return (
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: '#F47E52',
-        tabBarInactiveTintColor: '#999',
+        tabBarInactiveTintColor: colors.tabInactive,
         headerShown: false,
         tabBarStyle: {
-          backgroundColor: '#fff',
-          borderTopWidth: 0,
-          // Removed: position: 'absolute'
-          // Removed: bottom: 0
-          // Removed: left: 0
-          // Removed: right: 0
+          backgroundColor: colors.bar,
+          borderTopWidth: scheme === 'dark' ? 1 : 0,
+          borderTopColor: colors.border,
           elevation: 8,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.1,
+          shadowOpacity: scheme === 'dark' ? 0 : 0.1,
           shadowRadius: 8,
-          height: 70 + insets.bottom, // Optionally increase the total height to account for insets
-          paddingBottom: Math.max(insets.bottom, 20), // Keep this to ensure min padding or safe area
+          height: 70 + insets.bottom,
+          paddingBottom: Math.max(insets.bottom, 20),
           paddingTop: 12,
         },
       }}>
