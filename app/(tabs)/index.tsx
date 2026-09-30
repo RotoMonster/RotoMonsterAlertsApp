@@ -56,12 +56,29 @@ const LEVELS: Record<string, { label: string; color: string }> = {
   monster: { label: 'MONSTER', color: '#cc3300' },
 };
 
-const STATUSES: Record<string, { label: string; color: string; shade: boolean }> = {
-  probable: { label: 'PROBABLE', color: '#00cc44', shade: true },
-  questionable: { label: 'QUESTIONABLE', color: '#01A9DB', shade: true },
-  injured: { label: 'INJURED', color: '#cc3300', shade: true },
-  traded: { label: 'TRADED', color: '#e68a00', shade: true },
-  note: { label: 'NOTE', color: '#a6a6a6', shade: true },
+const STATUS_COLORS: Record<string, string> = {
+  probable: '#00cc44',
+  questionable: '#01A9DB',
+  injured: '#cc3300',
+  traded: '#e68a00',
+  note: '#a6a6a6',
+};
+
+const DEFAULT_STATUS_COLOR = '#a6a6a6';
+
+const toHex6 = (color: string) => {
+  const v = color.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(v)) return v;
+  if (/^#[0-9a-fA-F]{3}$/.test(v)) return '#' + v.slice(1).split('').map((ch) => ch + ch).join('');
+  return null;
+};
+
+const statusFor = (status?: string | null, statusColor?: string | null) => {
+  const label = status?.trim();
+  if (!label) return undefined;
+  const color =
+    (statusColor && toHex6(statusColor)) || STATUS_COLORS[label.toLowerCase()] || DEFAULT_STATUS_COLOR;
+  return { label: label.toUpperCase(), color };
 };
 
 const sportFor = (sportId: number | null) =>
@@ -84,6 +101,7 @@ interface MonitorMessage {
   url: string | null;
   level?: string | null;
   status?: string | null;
+  status_color?: string | null;
   is_player?: boolean;
   mine?: boolean;
   created_at: string;
@@ -379,8 +397,8 @@ export default function HomeScreen() {
     const sport = sportFor(item.sport_id);
     const color = sport?.color ?? DEFAULT_COLOR;
     const level = item.level ? LEVELS[item.level] : undefined;
-    const status = item.status ? STATUSES[item.status] : undefined;
-    const shade = status?.shade ? `${status.color}${scheme === 'dark' ? '29' : '1A'}` : null;
+    const status = statusFor(item.status, item.status_color);
+    const shade = status ? `${status.color}${scheme === 'dark' ? '29' : '1A'}` : null;
 
     return (
       <ReanimatedSwipeable
