@@ -41,6 +41,9 @@ export default function SettingsScreen() {
   const [busy, setBusy] = useState(false);
   const [myPlayersOnly, setMyPlayersOnly] = useState(false);
   const [linked, setLinked] = useState(true);
+  const [isStaff, setIsStaff] = useState(false);
+  const [staffNotifications, setStaffNotifications] = useState(true);
+  const [staffBusy, setStaffBusy] = useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -74,6 +77,8 @@ export default function SettingsScreen() {
               await AsyncStorage.setItem(STORAGE_KEYS.MY_PLAYERS, String(data.myPlayersOnly));
             }
             if (typeof data.linked === 'boolean') setLinked(data.linked);
+            setIsStaff(data.isStaff === true);
+            if (typeof data.staffNotifications === 'boolean') setStaffNotifications(data.staffNotifications);
           }
         } catch (error) {
         }
@@ -108,6 +113,29 @@ export default function SettingsScreen() {
       RNAlert.alert('Error', 'Could not update the notification setting.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const toggleStaffNotifications = async (value: boolean) => {
+    if (!registeredCode) return;
+
+    setStaffNotifications(value);
+    setStaffBusy(true);
+
+    try {
+      const response = await fetch(`${SERVER_URL}/api/device/${registeredCode}/staff-notifications`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: value }),
+      });
+
+      const data = await response.json();
+      if (!data.success) throw new Error(data.error);
+    } catch (error) {
+      setStaffNotifications(!value);
+      RNAlert.alert('Error', 'Could not update the staff notification setting.');
+    } finally {
+      setStaffBusy(false);
     }
   };
 
@@ -151,6 +179,7 @@ export default function SettingsScreen() {
               STORAGE_KEYS.MY_PLAYERS,
             ]);
             setRegisteredCode(null);
+            setIsStaff(false);
           },
         },
       ]
@@ -227,6 +256,24 @@ export default function SettingsScreen() {
           trackColor={{ true: '#E66000', false: c.control }}
         />
       </View>
+      {isStaff && (
+        <View style={[styles.row, styles.rowSpaced]}>
+          <View style={styles.rowText}>
+            <Text style={styles.rowTitle}>Staff alerts</Text>
+            <Text style={styles.rowSubtitle}>
+              {notificationsEnabled
+                ? 'Monitor and support alerts. They still appear in the list when this is off.'
+                : 'Turn on push notifications to get staff alerts.'}
+            </Text>
+          </View>
+          <Switch
+            value={staffNotifications && notificationsEnabled}
+            onValueChange={toggleStaffNotifications}
+            disabled={staffBusy || !registeredCode || !notificationsEnabled}
+            trackColor={{ true: '#E66000', false: c.control }}
+          />
+        </View>
+      )}
 
       <Text style={styles.sectionLabel}>DEVICE</Text>
       <View style={styles.row}>
@@ -279,6 +326,7 @@ const makeStyles = (c: Palette) =>
     borderRadius: 10,
     padding: 14,
   },
+  rowSpaced: { marginTop: 8 },
   rowText: { flex: 1, paddingRight: 12 },
   rowTitle: { fontSize: 15, fontWeight: '600', color: c.text },
   rowSubtitle: { fontSize: 13, color: c.sub, marginTop: 2 },
