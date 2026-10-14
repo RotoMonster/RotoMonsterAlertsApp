@@ -469,7 +469,7 @@ export default function HomeScreen() {
         style={[styles.registerContainer, { paddingTop: insets.top }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Text style={styles.registerTitle}>RotoMonster Alerts</Text>
+        <Text style={styles.registerTitle}>Basketball Monster Alerts</Text>
         <Text style={styles.registerSubtitle}>Enter the code you were given to start receiving alerts.</Text>
 
         <TextInput
